@@ -301,7 +301,86 @@ class LCAODiagKernel:
                 f.write(f'{1:8d}{ibnd+1:8d}{self.eigs[ikpt, ibnd]*hartree2ev:15.9f}\n')
         f.close()
         # todo: write wavefunctions
-    
+
+    @mpi_watch
+    def band_ri_convergence(self, nband_list=None, kpt_idx=None):
+        """
+        Compute band-RI convergence for Hamiltonian.
+
+        H_loc(N) = A[:N]^H @ diag(eigs[:N]) @ A[:N]
+
+        Parameters
+        ----------
+        nband_list : list of int, optional
+            Band window sizes to test. Default: [nbnd//4, nbnd//2, 3*nbnd//4, nbnd]
+        kpt_idx : int or list or None, optional
+            k-point index(es) to test. Default: all k-points.
+
+        Returns
+        -------
+        dict with keys:
+            'nband_list': list of band counts tested
+            'errors': array (nkpts, len(nband_list)) of convergence errors
+            'H_loc_final': dict mapping k-point index to final H_loc
+        """
+        from .mathutils import compute_local_h_band_ri, compute_band_ri_metric
+
+        if self.eigs is None or self.wfnao is None:
+            raise RuntimeError("Must call diag() before band_ri_convergence()")
+
+        nk, nbnd_total, nao = self.wfnao.shape
+
+        if nband_list is None:
+            nband_list = [nbnd_total // 4, nbnd_total // 2,
+                          3 * nbnd_total // 4, nbnd_total]
+            nband_list = [n for n in nband_list if n > 0]
+
+        if kpt_idx is None:
+            kpt_idx = list(range(nk))
+        elif isinstance(kpt_idx, int):
+            kpt_idx = [kpt_idx]
+
+        errors = np.zeros((len(kpt_idx), len(nband_list)))
+        H_loc_final = {}
+
+        if is_master():
+            print('\n========================================')
+            print('Band-RI convergence analysis')
+            print('========================================')
+
+        for ik_idx, ik in enumerate(kpt_idx):
+            eigs_k = self.eigs[ik]
+            A_k = self.wfnao[ik]
+            H_prev = None
+
+            if is_master():
+                kpt = self.kpts[ik]
+                print(f'\nk-point {ik}: ({kpt[0]:.4f}, {kpt[1]:.4f}, {kpt[2]:.4f})')
+
+            for i_nb, nbnd in enumerate(nband_list):
+                eigs_trunc = eigs_k[:nbnd]
+                A_trunc = A_k[:nbnd, :]
+
+                H_loc = compute_local_h_band_ri(eigs_trunc, A_trunc)
+                err = compute_band_ri_metric(H_loc, H_prev)
+                errors[ik_idx, i_nb] = err
+
+                if is_master():
+                    print(f'  nbnd = {nbnd:4d} | Frobenius change = {err:.6e}')
+
+                H_prev = H_loc
+
+            H_loc_final[ik] = H_prev
+
+        if is_master():
+            print('========================================\n')
+
+        return {
+            'nband_list': nband_list,
+            'errors': errors,
+            'H_loc_final': H_loc_final
+        }
+
 
 def mat_scipy2petsc(matcsr, comm=comm):
     if is_master(comm=comm):
