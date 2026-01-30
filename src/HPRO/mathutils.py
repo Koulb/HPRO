@@ -293,3 +293,82 @@ def kgrid_with_tr(gridsize):
     assert total == np.prod(kgrid)
     kptwts = kptwts / total
     return kpts, kptwts
+
+
+'''
+Utility functions for band-space Resolution of Identity
+'''
+
+
+def compute_local_h_band_ri(eigs, A, *, chunk=None):
+    """
+    Compute localized Hamiltonian via band-space Resolution of Identity.
+
+    H_loc = A† @ diag(ε) @ A
+
+    Parameters
+    ----------
+    eigs : ndarray, shape (nband,)
+        Eigenvalues (real).
+    A : ndarray, shape (nband, norb)
+        Projection matrix A[n, μ] = ⟨ψ_n|φ_μ⟩ (complex).
+    chunk : int or None, optional
+        If provided, accumulate in chunks over bands.
+
+    Returns
+    -------
+    H_loc : ndarray, shape (norb, norb)
+        Localized Hamiltonian (complex, Hermitian).
+
+    Notes
+    -----
+    Convention: A[n, μ] = ⟨ψ_n|φ_μ⟩ (matches HPRO wfnao convention where
+    wfnao[ik, n, μ] contains the coefficient of AO μ in band n).
+    Does not mutate inputs.
+    """
+    nband, norb = A.shape
+    if eigs.shape != (nband,):
+        raise ValueError(
+            f"Shape mismatch: eigs has shape {eigs.shape}, "
+            f"expected ({nband},) based on A shape {A.shape}"
+        )
+
+    if chunk is None:
+        # Efficient: H_loc = A^H @ (eigs[:, None] * A)
+        return A.conj().T @ (eigs[:, None] * A)
+    else:
+        # Chunked: accumulate Σ_n ε_n A_n* ⊗ A_n
+        H_loc = np.zeros((norb, norb), dtype=np.result_type(A, eigs))
+        for i_start in range(0, nband, chunk):
+            i_end = min(i_start + chunk, nband)
+            A_chunk = A[i_start:i_end, :]
+            eigs_chunk = eigs[i_start:i_end]
+            H_loc += A_chunk.conj().T @ (eigs_chunk[:, None] * A_chunk)
+        return H_loc
+
+
+def compute_band_ri_metric(H_new, H_prev, *, eps=1e-12):
+    """
+    Relative Frobenius norm change.
+
+    err = ||H_new - H_prev||_F / max(||H_new||_F, eps)
+
+    Parameters
+    ----------
+    H_new : ndarray
+        Current Hamiltonian matrix.
+    H_prev : ndarray or None
+        Previous Hamiltonian matrix. If None, returns inf.
+    eps : float
+        Small constant to avoid division by zero.
+
+    Returns
+    -------
+    err : float
+        Relative Frobenius norm of the difference.
+    """
+    if H_prev is None:
+        return float('inf')
+    diff_norm = np.linalg.norm(H_new - H_prev, 'fro')
+    ref_norm = max(np.linalg.norm(H_new, 'fro'), eps)
+    return diff_norm / ref_norm
