@@ -67,8 +67,8 @@ class bgw_vsc:
         self.atomic_number = np.empty(self.nat, dtype=int) # (nat) atomic numbers
         for iat in range(self.nat):
             for d in range(3):
-                self.tau[iat, d] = rec[iat*4+d]
-            self.atomic_number[iat] = rec[iat*4+3]
+                self.tau[iat, d] = rec[iat*4+d].item()
+            self.atomic_number[iat] = rec[iat*4+3].item()
         # print(tau) # alat
         # print(atomic_number)
         
