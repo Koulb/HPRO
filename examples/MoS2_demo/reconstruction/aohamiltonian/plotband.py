@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 
 min_plot_energy = -2.5
-max_plot_energy = 4
+max_plot_energy = 10
 
 trim_gap = True
 trim_min = 0.1
