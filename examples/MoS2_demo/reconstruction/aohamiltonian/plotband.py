@@ -26,7 +26,7 @@ basic_folder = './'
 basic_filename = 'eig.dat'
 
 plot_args = [(('./', 'eig.dat', 'scatter', 4.785239202,), dict(color='blue', s=5, zorder=4)),
-             (('../../bands/MoS2.save', 'band.json', 'plot', 0.0), dict(color='red', linestyle='-', linewidth=1.5, zorder=3))]
+             (('../../bands_ref/MoS2.save', 'band.json', 'plot', 0.0), dict(color='red', linestyle='-', linewidth=1.5, zorder=3))]
 # plot_args = [(('./', 'scatter', 4.8133), dict(color='blue', s=5, zorder=4))]
 
 def loaddata(folder, filename):
