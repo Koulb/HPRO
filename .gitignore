@@ -165,3 +165,14 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
+examples/MoS2_demo/aobasis/*
+examples/MoS2_demo/bands/*
+examples/MoS2_demo/scf/*
+examples/MoS2_demo/reconstruction/aohamiltonian/*.dat
+examples/MoS2_demo/reconstruction/aohamiltonian/*.h5
+examples/MoS2_demo/reconstruction/aohamiltonian/*.png
+examples/MoS2_demo/reconstruction/aohamiltonian/*.svg
+examples/MoS2_demo/reconstruction/aohamiltonian/*.json
+
+
+
