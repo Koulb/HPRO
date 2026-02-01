@@ -1,0 +1,35 @@
+&CONTROL
+ calculation = 'scf'
+ prefix = 'diamond'
+ pseudo_dir = '../pseudos'
+ outdir = './'
+/
+
+&SYSTEM
+ ibrav = 0
+ A = 3.567
+
+ ecutwfc = 60.0
+
+ nat = 2
+ ntyp = 1
+/
+
+&ELECTRONS
+ conv_thr = 1.0d-12
+/
+
+CELL_PARAMETERS alat
+    0.0    0.5    0.5
+    0.5    0.0    0.5
+    0.5    0.5    0.0
+
+ATOMIC_SPECIES
+  C  12.011  C.upf
+
+ATOMIC_POSITIONS crystal
+  C    0.00    0.00    0.00
+  C    0.25    0.25    0.25
+
+K_POINTS automatic
+4 4 4 0 0 0

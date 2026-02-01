@@ -1,0 +1,50 @@
+
+SystemName   Diamond
+SystemLabel  siesta
+
+NumberOfAtoms        2
+NumberOfSpecies      1
+%block ChemicalSpeciesLabel
+  1 6 C
+%endblock ChemicalSpeciesLabel
+LatticeConstant    3.567  Ang
+%block LatticeVectors
+    0.0    0.5    0.5
+    0.5    0.0    0.5
+    0.5    0.5    0.0
+%endblock LatticeVectors
+AtomicCoordinatesFormat  Fractional
+%block AtomicCoordinatesAndAtomicSpecies
+  0.00    0.00    0.00  1
+  0.25    0.25    0.25  1
+%endblock AtomicCoordinatesAndAtomicSpecies
+
+PAO.BasisSize       DZP
+PAO.BasisType       nodes
+%block PAO.Basis
+C          2
+ n=2   0   2
+   0.000      0.000
+   1.000      1.000
+ n=2   1   2 P
+   0.000      0.000
+   1.000      1.000
+%endblock PAO.Basis
+
+%block kgrid_Monkhorst_Pack
+   4    0    0   0.0
+   0    4    0   0.0
+   0    0    4   0.0
+%endblock kgrid_Monkhorst_Pack
+
+SolutionMethod          diagon
+OccupationFunction      MP
+ElectronicTemperature   0.0000 eV
+MaxSCFIterations        300
+MeshCutoff              320.0 Ry
+DM.Tolerance            1.E-6
+SCF.H.Converge          F
+UseSaveData             F
+DM.UseSaveDM            F
+SpinOrbit               F
+Diag.ParallelOverK      T

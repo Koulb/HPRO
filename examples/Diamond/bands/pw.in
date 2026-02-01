@@ -1,0 +1,43 @@
+&CONTROL
+ calculation = 'bands'
+ prefix = 'diamond'
+ pseudo_dir = '../pseudos'
+ outdir = './'
+/
+
+&SYSTEM
+ ibrav = 0
+ A = 3.567
+
+ ecutwfc = 60.0
+
+ nat = 2
+ ntyp = 1
+
+ nbnd = 100
+/
+
+&ELECTRONS
+ conv_thr = 1.0d-12
+ diago_full_acc = .true.
+/
+
+CELL_PARAMETERS alat
+    0.0    0.5    0.5
+    0.5    0.0    0.5
+    0.5    0.5    0.0
+
+ATOMIC_SPECIES
+  C  12.011  C.upf
+
+ATOMIC_POSITIONS crystal
+  C    0.00    0.00    0.00
+  C    0.25    0.25    0.25
+
+K_POINTS crystal_b
+  5
+  0.000  0.000  0.000  20
+  0.500  0.000  0.500  15
+  0.500  0.250  0.750  15
+  0.500  0.500  0.500  20
+  0.000  0.000  0.000  1
