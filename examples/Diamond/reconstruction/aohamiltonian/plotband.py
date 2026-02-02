@@ -25,8 +25,7 @@ max_plot_energy = 30
 fontsize = 16
 plot_dpi = 400
 
-# Fermi energy from QE (in eV) - used to align all methods
-FERMI_ENERGY_EV = 13.3935
+# Fermi energy will be read from QE XML file
 
 # Paths
 bands_save_dir = '../../bands/diamond.save'
@@ -53,7 +52,7 @@ def get_structure_from_xml(xml_path):
 
 
 def parse_kpoints_and_eigs_xml(xml_path):
-    """Parse k-points and eigenvalues from QE XML."""
+    """Parse k-points, eigenvalues, and Fermi energy from QE XML."""
     tree = ET.parse(xml_path)
     kpoints_cart = []
     eigenvalues = []
@@ -62,7 +61,10 @@ def parse_kpoints_and_eigs_xml(xml_path):
         kpoints_cart.append(kpt)
         eigs = np.array([float(x) for x in ks_energies.find('eigenvalues').text.split()])
         eigenvalues.append(eigs)
-    return kpoints_cart, eigenvalues
+    # Get Fermi energy from XML (in Hartree)
+    fermi_elem = tree.find('.//fermi_energy')
+    fermi_energy_ha = float(fermi_elem.text) if fermi_elem is not None else 0.0
+    return kpoints_cart, eigenvalues, fermi_energy_ha
 
 
 def read_wfc_qe(path, nbands):
@@ -152,9 +154,11 @@ nao = sum(lcaodata.norbfull_spc[spc] for spc in structure.atomic_numbers)
 matH = load_deeph_HS('./', 'hamiltonians.h5', energy_unit=True)
 matS = load_deeph_HS('./', 'overlaps.h5', energy_unit=False)
 
-# Get k-points and QE eigenvalues from bands calculation
-kpoints_cart, qe_eigenvalues = parse_kpoints_and_eigs_xml(xml_path)
+# Get k-points, QE eigenvalues, and Fermi energy from bands calculation
+kpoints_cart, qe_eigenvalues, fermi_ha = parse_kpoints_and_eigs_xml(xml_path)
+FERMI_ENERGY_EV = fermi_ha * hartree2ev
 nkpt = len(kpoints_cart)
+print(f"Fermi energy from XML: {FERMI_ENERGY_EV:.6f} eV")
 
 # Convert k-points to crystal coordinates
 kpoints_cryst = []
@@ -255,11 +259,14 @@ for hsk in hsk_coords:
 # Fermi level
 ax.axhline(0.0, color='black', linestyle='dashed', linewidth=0.7)
 
+shift_ri = -eigs_bandri[:,3].max() 
+shift_dft = -eigs_dft[:,3].max()
+
 # Plot bands
 for band_i in range(nbnd_plot):
     # DFT - red solid line
     label_dft = 'DFT (QE)' if band_i == 0 else None
-    ax.plot(kcoords, eigs_dft[:, band_i], 'r-', linewidth=1.5, label=label_dft, zorder=3)
+    ax.plot(kcoords, eigs_dft[:, band_i] + shift_dft, 'r-', linewidth=1.5, label=label_dft, zorder=3)
 
     # Original reconstruction - blue dashed
     label_orig = 'Original' if band_i == 0 else None
@@ -267,7 +274,7 @@ for band_i in range(nbnd_plot):
 
     # Band-RI - green dots
     label_bandri = 'Band-RI' if band_i == 0 else None
-    ax.scatter(kcoords, eigs_bandri[:, band_i], c='green', s=3, label=label_bandri, zorder=4)
+    ax.scatter(kcoords, eigs_bandri[:, band_i] + shift_ri, c='green', s=3, label=label_bandri, zorder=4)
 
 ax.legend(loc='upper right', fontsize=0.75*fontsize)
 ax.set_title('Diamond Band Structure', fontsize=fontsize)
