@@ -159,6 +159,42 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+# QE/SIESTA generated outputs
+examples/**/*.save/
+examples/**/pw.out
+examples/**/pw2bgw.out
+examples/**/*.log
+examples/**/INPUT_TMP.*
+examples/**/charge-density.hdf5
+examples/**/data-file-schema.xml
+examples/**/band.json
+examples/**/wfc*.dat
+examples/**/VSC
+examples/**/siesta.DM
+examples/**/siesta.HSX
+examples/**/siesta.ORB_INDX
+examples/**/siesta.EIG
+examples/**/siesta.FA
+examples/**/siesta.XV
+examples/**/siesta.out
+examples/**/siesta.alloc
+examples/**/aobasis/*.ion
+examples/**/aobasis/*.ion.nc
+examples/**/aobasis/*.psml
+examples/**/aobasis/0_NORMAL_EXIT
+examples/**/aobasis/BASIS_*
+examples/**/aobasis/FORCE_STRESS
+examples/**/aobasis/siesta.BASIS_*
+examples/**/aobasis/siesta.BONDS*
+examples/**/aobasis/siesta.KP
+examples/**/aobasis/siesta.STRUCT_OUT
+examples/**/aobasis/siesta.bib
+examples/**/CLOCK
+examples/**/MESSAGES
+examples/**/OUTVARS.yml
+examples/**/PARALLEL_DIST
+examples/**/NON_TRIMMED_KP_LIST
+
 # pytype static type analyzer
 .pytype/
 
@@ -184,6 +220,4 @@ examples/Diamond/reconstruction/aohamiltonian/*.h5
 examples/Diamond/reconstruction/aohamiltonian/*.png
 examples/Diamond/reconstruction/aohamiltonian/*.svg
 examples/Diamond/reconstruction/aohamiltonian/*.json
-
-
 

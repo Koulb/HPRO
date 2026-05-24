@@ -14,12 +14,13 @@
  nat = 2
  ntyp = 1
 
- nbnd = 100
+ nbnd = 200
 /
 
 &ELECTRONS
  conv_thr = 1.0d-12
  diago_full_acc = .true.
+ diagonalization = 'cg'
 /
 
 CELL_PARAMETERS alat

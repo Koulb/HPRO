@@ -2,21 +2,19 @@
 """
 Plot band structure comparison for Diamond.
 Compares: DFT (QE), Original reconstruction (eig.dat),
-          Band-RI direct k-space reconstruction
+          Band-RI real-space reconstruction (eig_ri.dat)
 """
 
 import numpy as np
 import json
 import xml.etree.ElementTree as ET
-from scipy.io import FortranFile
 from scipy.linalg import eigh
 import matplotlib.pyplot as plt
 
 from HPRO.deephio import load_deeph_HS
-from HPRO.mathutils import compute_local_h_band_ri
 from HPRO.structure import Structure
-from HPRO.lcaodata import LCAOData, calc_FT_kg_orb_spcs
 from HPRO.constants import hartree2ev
+
 
 # =============================================================================
 # Parameters
@@ -28,42 +26,13 @@ plot_dpi = 400
 
 # Paths
 bands_save_dir = '../../bands/diamond.save'
+band_json_path = f'{bands_save_dir}/band.json'
 xml_path = f'{bands_save_dir}/data-file-schema.xml'
-aobasis_dir = '../../aobasis'
-ecut = 30
-nbands_bandri = 100  # Number of bands for band-RI
+
 
 # =============================================================================
 # Helper functions
 # =============================================================================
-
-def get_structure_from_xml(xml_path):
-    """Get structure info from QE XML file."""
-    tree = ET.parse(xml_path)
-    root = tree.getroot()
-    cell_elem = root.find('.//atomic_structure/cell')
-    a1 = np.array([float(x) for x in cell_elem.find('a1').text.split()])
-    a2 = np.array([float(x) for x in cell_elem.find('a2').text.split()])
-    a3 = np.array([float(x) for x in cell_elem.find('a3').text.split()])
-    rprim = np.array([a1, a2, a3])
-    gprim = 2 * np.pi * np.linalg.inv(rprim.T)
-    return rprim, gprim
-
-
-def parse_kpoints_and_eigs_xml(xml_path):
-    """Parse k-points, eigenvalues, and Fermi energy from QE XML."""
-    tree = ET.parse(xml_path)
-    kpoints_cart = []
-    eigenvalues = []
-    for ks_energies in tree.iter('ks_energies'):
-        kpt = np.array([float(x) for x in ks_energies.find('k_point').text.split()])
-        kpoints_cart.append(kpt)
-        eigs = np.array([float(x) for x in ks_energies.find('eigenvalues').text.split()])
-        eigenvalues.append(eigs)
-    fermi_elem = tree.find('.//fermi_energy')
-    fermi_energy_ha = float(fermi_elem.text) if fermi_elem is not None else 0.0
-    return kpoints_cart, eigenvalues, fermi_energy_ha
-
 
 def load_from_eigdat(eig_path, lat_path):
     """Load eigenvalues and k-path from eig.dat format."""
@@ -103,57 +72,32 @@ def load_from_eigdat(eig_path, lat_path):
     return kcoords, eigs, hsk_coords, hsk_symbols
 
 
-def read_wfc_qe(path, nbands):
-    """Read QE wavefunction file."""
-    f = FortranFile(path, 'r')
-    f.read_record(dtype='<i4')
-    data = f.read_ints(np.int32)
-    _, igwx, _, nbnd_file = data
-    f.read_reals()
-    miller = f.read_ints().reshape((3, igwx), order="F")
-    evc_list = []
-    for _ in range(min(nbands, nbnd_file)):
-        evc = f.read_record(dtype='<d').reshape((2, igwx), order="F")
-        evc = np.vectorize(complex)(evc[0], evc[1])
-        norm = np.sqrt(np.sum(np.conj(evc) * evc).real)
-        if norm > 1e-10:
-            evc /= norm
-        evc_list.append(evc)
-    f.close()
-    return evc_list, miller
+def parse_kpoints_and_eigs_xml(xml_path):
+    """Parse k-points, eigenvalues, and Fermi energy from QE XML."""
+    tree = ET.parse(xml_path)
+    kpoints_cart = []
+    eigenvalues = []
+    for ks_energies in tree.iter('ks_energies'):
+        kpt = np.array([float(x) for x in ks_energies.find('k_point').text.split()])
+        kpoints_cart.append(kpt)
+        eigs = np.array([float(x) for x in ks_energies.find('eigenvalues').text.split()])
+        eigenvalues.append(eigs)
+    fermi_elem = tree.find('.//fermi_energy')
+    fermi_energy_ha = float(fermi_elem.text) if fermi_elem is not None else 0.0
+    return kpoints_cart, eigenvalues, fermi_energy_ha
 
 
-def compute_ao_in_pw_basis(miller, gprim, kpt_cryst, structure, lcaodata, ecut):
-    """Compute AO functions in PW basis."""
-    ngw = miller.shape[1]
-    kgcart = np.zeros((ngw, 3))
-    for ig in range(ngw):
-        g_cryst = miller[:, ig]
-        g_cart = gprim.T @ g_cryst
-        k_cart = gprim.T @ kpt_cryst
-        kgcart[ig] = k_cart + g_cart
-    FT_kg_orb_spcs = calc_FT_kg_orb_spcs(ngw, kgcart, lcaodata, ecut)
-    nao_total = sum(lcaodata.norbfull_spc[spc] for spc in structure.atomic_numbers)
-    phi_kg = np.zeros((ngw, nao_total), dtype=np.complex128)
-    iao = 0
-    for iatom, spc in enumerate(structure.atomic_numbers):
-        nao_atom = lcaodata.norbfull_spc[spc]
-        tau = structure.atomic_positions_cart[iatom]
-        phase = np.exp(-1j * kgcart @ tau)
-        phi_kg[:, iao:iao+nao_atom] = FT_kg_orb_spcs[spc] * phase[:, None]
-        iao += nao_atom
-    return phi_kg
-
-
-def compute_overlap_matrix_pw(psi_list, phi_kg, cell_volume):
-    """Compute A[n,μ] = ⟨ψ_n|φ_μ⟩."""
-    nbnd = len(psi_list)
-    nao = phi_kg.shape[1]
-    norm_factor = 1.0 / np.sqrt(cell_volume)
-    A = np.zeros((nbnd, nao), dtype=np.complex128)
-    for n, psi in enumerate(psi_list):
-        A[n, :] = norm_factor * np.conj(psi) @ phi_kg
-    return A
+def get_structure_from_xml(xml_path):
+    """Get structure info from QE XML file."""
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+    cell_elem = root.find('.//atomic_structure/cell')
+    a1 = np.array([float(x) for x in cell_elem.find('a1').text.split()])
+    a2 = np.array([float(x) for x in cell_elem.find('a2').text.split()])
+    a3 = np.array([float(x) for x in cell_elem.find('a3').text.split()])
+    rprim = np.array([a1, a2, a3])
+    gprim = 2 * np.pi * np.linalg.inv(rprim.T)
+    return rprim, gprim
 
 
 def diagonalize_generalized(H, S):
@@ -164,23 +108,12 @@ def diagonalize_generalized(H, S):
     return eigenvalues
 
 
-def loaddata_json(filepath):
-    """Load band.json data."""
-    with open(filepath, 'r') as f:
-        data = json.load(f)
-    for key, val in data.items():
-        if type(val) is list:
-            data[key] = np.array(val)
-    return data
-
-
 # =============================================================================
-# Load DFT data from QE bands XML
+# Load DFT data from QE bands XML (same approach as Diamond/plotband.py)
 # =============================================================================
 print("Loading DFT data from QE bands XML...")
 
 rprim, gprim = get_structure_from_xml(xml_path)
-cell_volume = np.abs(np.linalg.det(rprim))
 kpoints_cart, qe_eigenvalues, fermi_ha = parse_kpoints_and_eigs_xml(xml_path)
 FERMI_ENERGY_EV = fermi_ha * hartree2ev
 nkpt_dft = len(kpoints_cart)
@@ -220,60 +153,34 @@ nkpt_orig = len(kcoords_orig)
 print(f"Original: {nkpt_orig} k-points, {eigs_orig.shape[1]} bands")
 
 # =============================================================================
-# Compute Band-RI direct k-space eigenvalues
+# Load Band-RI reconstruction from eig_ri.dat
 # =============================================================================
-print("Computing Band-RI direct k-space eigenvalues...")
-
-structure = Structure.from_deeph('./')
-lcaodata = LCAOData(structure, basis_path_root=aobasis_dir, aocode='siesta')
-matH = load_deeph_HS('./', 'hamiltonians.h5', energy_unit=True)
-matS = load_deeph_HS('./', 'overlaps.h5', energy_unit=False)
-
-# Convert DFT k-points to crystal coordinates
-kpoints_cryst = []
-for kc in kpoints_cart:
-    k_cryst = rprim @ kc / (2 * np.pi)
-    kpoints_cryst.append(k_cryst)
-
-eigs_bandri = np.zeros((nkpt_dft, nbnd_plot))
-for ik in range(nkpt_dft):
-    kpt_cryst = kpoints_cryst[ik]
-    Sk = matS.r2k(kpt_cryst).toarray()
-    wfc_path = f'{bands_save_dir}/wfc{ik+1}.dat'
-    try:
-        psi_list, miller = read_wfc_qe(wfc_path, nbands_bandri)
-        phi_kg = compute_ao_in_pw_basis(miller, gprim, kpt_cryst, structure, lcaodata, ecut)
-        A_k = compute_overlap_matrix_pw(psi_list, phi_kg, cell_volume)
-        eigs_k_ha = qe_eigenvalues[ik][:nbands_bandri]
-        H_bandri = compute_local_h_band_ri(eigs_k_ha, A_k)
-        eigs_bandri_ha = diagonalize_generalized(H_bandri, Sk)
-        eigs_bandri[ik] = eigs_bandri_ha[:nbnd_plot] * hartree2ev
-    except Exception as e:
-        print(f"  Warning at k={ik+1}: {e}")
-        eigs_bandri[ik] = eigs_dft[ik] + FERMI_ENERGY_EV
-eigs_bandri -= FERMI_ENERGY_EV
-
-print("Done computing eigenvalues.")
+print("Loading Band-RI reconstruction from eig_ri.dat...")
+kcoords_ri, eigs_ri, _, _ = load_from_eigdat('eig_ri.dat', 'lat.dat')
+nkpt_ri = len(kcoords_ri)
+print(f"Band-RI: {nkpt_ri} k-points, {eigs_ri.shape[1]} bands")
 
 # =============================================================================
 # Align energies using VBM (band 4 = index 3 for Diamond with 8 valence electrons)
 # =============================================================================
+# Diamond: 2 C atoms × 4 electrons = 8 electrons → 4 occupied bands → VBM = band index 3
 vbm_idx = 3
 shift_dft = -eigs_dft[:, vbm_idx].max()
 shift_orig = -eigs_orig[:, vbm_idx].max()
-shift_ri = -eigs_bandri[:, vbm_idx].max()
+shift_ri = -eigs_ri[:, vbm_idx].max()
 
 eigs_dft_shifted = eigs_dft + shift_dft
 eigs_orig_shifted = eigs_orig + shift_orig
-eigs_ri_shifted = eigs_bandri + shift_ri
+eigs_ri_shifted = eigs_ri + shift_ri
 
 # =============================================================================
 # Scale k-coordinates for consistent plotting
 # =============================================================================
 x_max = kcoords_dft[-1]
 kcoords_orig_scaled = kcoords_orig * (x_max / kcoords_orig[-1])
+kcoords_ri_scaled = kcoords_ri * (x_max / kcoords_ri[-1])
 
-nbnd_plot = min(nbnd_plot, eigs_orig.shape[1])
+nbnd_plot = min(nbnd_plot, eigs_orig.shape[1], eigs_ri.shape[1])
 
 # =============================================================================
 # Create plot
@@ -301,18 +208,18 @@ for band_i in range(nbnd_plot):
     ax.plot(kcoords_dft, eigs_dft_shifted[:, band_i], 'r-', linewidth=1.5, label=label_dft, zorder=3)
 
     label_orig = 'Original' if band_i == 0 else None
-    ax.plot(kcoords_orig_scaled, eigs_orig_shifted[:, band_i], 'b--', linewidth=1.2, label=label_orig, zorder=2)
+    ax.plot(kcoords_orig_scaled, eigs_orig_shifted[:, band_i], 'b-x', linewidth=1.2, label=label_orig, zorder=2)
 
-    label_bandri = 'Band-RI' if band_i == 0 else None
-    ax.scatter(kcoords_dft, eigs_ri_shifted[:, band_i], c='green', s=3, label=label_bandri, zorder=4)
+    label_ri = 'Band-RI (real)' if band_i == 0 else None
+    ax.scatter(kcoords_ri_scaled, eigs_ri_shifted[:, band_i], c='green', s=3, label=label_ri, zorder=4)
 
 ax.legend(loc='upper right', fontsize=0.75*fontsize)
 ax.set_title('Diamond Band Structure', fontsize=fontsize)
 
 plt.tight_layout()
-plt.savefig('band.png', dpi=plot_dpi)
-plt.savefig('band.svg', transparent=True)
-print("Saved band.png and band.svg")
+plt.savefig('band_real.png', dpi=plot_dpi)
+plt.savefig('band_real.svg', transparent=True)
+print("Saved band_real.png and band_real.svg")
 
 # =============================================================================
 # Print MAE summary (VBM-aligned)
@@ -321,10 +228,10 @@ print("\n" + "="*60)
 print("MAE vs DFT (meV) - VBM-aligned")
 print("="*60)
 
-nk_compare = min(nkpt_dft, nkpt_orig)
+nk_compare = min(nkpt_dft, nkpt_orig, nkpt_ri)
 for n in [4, 8, 16]:
     if n > nbnd_plot:
         continue
     mae_orig = np.mean(np.abs(eigs_orig_shifted[:nk_compare, :n] - eigs_dft_shifted[:nk_compare, :n])) * 1000
-    mae_bandri = np.mean(np.abs(eigs_ri_shifted[:, :n] - eigs_dft_shifted[:, :n])) * 1000
-    print(f"Lowest {n:2d} bands: Original = {mae_orig:7.1f} meV, Band-RI = {mae_bandri:7.1f} meV")
+    mae_ri = np.mean(np.abs(eigs_ri_shifted[:nk_compare, :n] - eigs_dft_shifted[:nk_compare, :n])) * 1000
+    print(f"Lowest {n:2d} bands: Original = {mae_orig:7.1f} meV, Band-RI = {mae_ri:7.1f} meV")

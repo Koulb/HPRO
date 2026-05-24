@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 """
-Plot band structure comparison for Diamond.
-Compares: DFT (QE), Original reconstruction (eig.dat),
-          Band-RI direct k-space reconstruction
+Plot band structure comparison for MoS2.
+Compares: DFT (QE), Original reconstruction, Band-RI reconstruction
+
+NOTE: Original reconstruction uses eigenvalues from eig.dat (computed by diag.py)
+      with its own k-path. DFT and Band-RI use QE k-points from band.json/XML.
 """
 
 import numpy as np
@@ -21,52 +23,28 @@ from HPRO.constants import hartree2ev
 # =============================================================================
 # Parameters
 # =============================================================================
-min_plot_energy = -15
-max_plot_energy = 30
+min_plot_energy = -8
+max_plot_energy = 10
 fontsize = 16
 plot_dpi = 400
 
+# Fermi energy for Original reconstruction (from diag.py or manual)
+FERMI_ENERGY_ORIG = 4.785239202  # eV
+
 # Paths
-bands_save_dir = '../../bands/diamond.save'
+bands_save_dir = '../../bands/MoS2.save'
+band_json_path = f'{bands_save_dir}/band.json'
 xml_path = f'{bands_save_dir}/data-file-schema.xml'
 aobasis_dir = '../../aobasis'
-ecut = 30
-nbands_bandri = 100  # Number of bands for band-RI
+ecut = 30 
+nbands_bandri = 250#2 * 100   # Number of bands for band-RI
 
 # =============================================================================
 # Helper functions
 # =============================================================================
 
-def get_structure_from_xml(xml_path):
-    """Get structure info from QE XML file."""
-    tree = ET.parse(xml_path)
-    root = tree.getroot()
-    cell_elem = root.find('.//atomic_structure/cell')
-    a1 = np.array([float(x) for x in cell_elem.find('a1').text.split()])
-    a2 = np.array([float(x) for x in cell_elem.find('a2').text.split()])
-    a3 = np.array([float(x) for x in cell_elem.find('a3').text.split()])
-    rprim = np.array([a1, a2, a3])
-    gprim = 2 * np.pi * np.linalg.inv(rprim.T)
-    return rprim, gprim
-
-
-def parse_kpoints_and_eigs_xml(xml_path):
-    """Parse k-points, eigenvalues, and Fermi energy from QE XML."""
-    tree = ET.parse(xml_path)
-    kpoints_cart = []
-    eigenvalues = []
-    for ks_energies in tree.iter('ks_energies'):
-        kpt = np.array([float(x) for x in ks_energies.find('k_point').text.split()])
-        kpoints_cart.append(kpt)
-        eigs = np.array([float(x) for x in ks_energies.find('eigenvalues').text.split()])
-        eigenvalues.append(eigs)
-    fermi_elem = tree.find('.//fermi_energy')
-    fermi_energy_ha = float(fermi_elem.text) if fermi_elem is not None else 0.0
-    return kpoints_cart, eigenvalues, fermi_energy_ha
-
-
-def load_from_eigdat(eig_path, lat_path):
-    """Load eigenvalues and k-path from eig.dat format."""
+def load_original_from_eigdat(eig_path, lat_path):
+    """Load Original reconstruction eigenvalues and k-path from eig.dat."""
     bohr2ang = 0.5291772105638411
     rprim = np.loadtxt(lat_path).T / bohr2ang
     gprim = np.linalg.inv(rprim.T)
@@ -101,6 +79,45 @@ def load_from_eigdat(eig_path, lat_path):
     hsk_coords = [kcoords[i] for i in hsk_idcs]
 
     return kcoords, eigs, hsk_coords, hsk_symbols
+
+
+def load_dft_from_bandjson(path):
+    """Load DFT eigenvalues and k-path from band.json."""
+    with open(path, 'r') as f:
+        data = json.load(f)
+    eigs = np.array(data['spin_up_energys']).T  # (nk, nbnd)
+    kcoords = np.array(data['kpoints_coords'], dtype=float)
+    hsk_coords = data['hsk_coords']
+    hsk_symbols = data['plot_hsk_symbols']
+    return kcoords, eigs, hsk_coords, hsk_symbols
+
+
+def get_structure_from_xml(xml_path):
+    """Get structure info from QE XML file."""
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+    cell_elem = root.find('.//atomic_structure/cell')
+    a1 = np.array([float(x) for x in cell_elem.find('a1').text.split()])
+    a2 = np.array([float(x) for x in cell_elem.find('a2').text.split()])
+    a3 = np.array([float(x) for x in cell_elem.find('a3').text.split()])
+    rprim = np.array([a1, a2, a3])
+    gprim = 2 * np.pi * np.linalg.inv(rprim.T)
+    return rprim, gprim
+
+
+def parse_kpoints_and_eigs_xml(xml_path):
+    """Parse k-points, eigenvalues, and Fermi energy from QE XML."""
+    tree = ET.parse(xml_path)
+    kpoints_cart = []
+    eigenvalues = []
+    for ks_energies in tree.iter('ks_energies'):
+        kpt = np.array([float(x) for x in ks_energies.find('k_point').text.split()])
+        kpoints_cart.append(kpt)
+        eigs = np.array([float(x) for x in ks_energies.find('eigenvalues').text.split()])
+        eigenvalues.append(eigs)
+    fermi_elem = tree.find('.//fermi_energy')
+    fermi_energy_ha = float(fermi_elem.text) if fermi_elem is not None else 0.0
+    return kpoints_cart, eigenvalues, fermi_energy_ha
 
 
 def read_wfc_qe(path, nbands):
@@ -164,116 +181,82 @@ def diagonalize_generalized(H, S):
     return eigenvalues
 
 
-def loaddata_json(filepath):
-    """Load band.json data."""
-    with open(filepath, 'r') as f:
-        data = json.load(f)
-    for key, val in data.items():
-        if type(val) is list:
-            data[key] = np.array(val)
-    return data
-
-
 # =============================================================================
-# Load DFT data from QE bands XML
-# =============================================================================
-print("Loading DFT data from QE bands XML...")
-
-rprim, gprim = get_structure_from_xml(xml_path)
-cell_volume = np.abs(np.linalg.det(rprim))
-kpoints_cart, qe_eigenvalues, fermi_ha = parse_kpoints_and_eigs_xml(xml_path)
-FERMI_ENERGY_EV = fermi_ha * hartree2ev
-nkpt_dft = len(kpoints_cart)
-
-nbnd_plot = 20
-
-# DFT eigenvalues
-eigs_dft = np.zeros((nkpt_dft, nbnd_plot))
-for ik in range(nkpt_dft):
-    eigs_dft[ik] = qe_eigenvalues[ik][:nbnd_plot] * hartree2ev
-eigs_dft -= FERMI_ENERGY_EV
-
-# DFT k-coordinates
-kpoints_cart_arr = np.array(kpoints_cart)
-dis = np.linalg.norm(np.diff(kpoints_cart_arr, axis=0), axis=1)
-kcoords_dft = np.concatenate(([0.0], np.cumsum(dis)))
-
-# Find HSK points
-hsk_idcs_dft = [0]
-for i in range(nkpt_dft - 3):
-    x1, x2, x3 = kpoints_cart_arr[i], kpoints_cart_arr[i+1], kpoints_cart_arr[i+2]
-    is_corner = np.sum(np.power(np.cross(x1-x2, x2-x3), 2)) > 1e-15
-    if is_corner:
-        hsk_idcs_dft.append(i+1)
-hsk_idcs_dft.append(nkpt_dft - 1)
-hsk_coords_dft = [kcoords_dft[i] for i in hsk_idcs_dft]
-hsk_symbols = ['Γ', 'X', 'W', 'L', 'Γ']
-
-print(f"DFT: {nkpt_dft} k-points, Fermi = {FERMI_ENERGY_EV:.4f} eV")
-
-# =============================================================================
-# Load Original reconstruction from eig.dat
+# Load Original reconstruction from eig.dat (uses diag.py k-path)
 # =============================================================================
 print("Loading Original reconstruction from eig.dat...")
-kcoords_orig, eigs_orig, hsk_coords_orig, _ = load_from_eigdat('eig.dat', 'lat.dat')
+kcoords_orig, eigs_orig, hsk_coords_orig, hsk_symbols = load_original_from_eigdat('eig.dat', 'lat.dat')
+eigs_orig = eigs_orig - FERMI_ENERGY_ORIG  # Shift to Fermi = 0
 nkpt_orig = len(kcoords_orig)
 print(f"Original: {nkpt_orig} k-points, {eigs_orig.shape[1]} bands")
 
 # =============================================================================
-# Compute Band-RI direct k-space eigenvalues
+# Load DFT from band.json (uses QE k-path)
 # =============================================================================
-print("Computing Band-RI direct k-space eigenvalues...")
+print("Loading DFT from band.json...")
+kcoords_dft, eigs_dft, hsk_coords_dft, _ = load_dft_from_bandjson(band_json_path)
+# band.json is already Fermi-shifted
+nkpt_dft = len(kcoords_dft)
+print(f"DFT: {nkpt_dft} k-points, {eigs_dft.shape[1]} bands")
+
+# =============================================================================
+# Compute Band-RI on QE k-points (needs wavefunction files)
+# =============================================================================
+print("Computing Band-RI...")
+
+rprim, gprim = get_structure_from_xml(xml_path)
+cell_volume = np.abs(np.linalg.det(rprim))
 
 structure = Structure.from_deeph('./')
 lcaodata = LCAOData(structure, basis_path_root=aobasis_dir, aocode='siesta')
-matH = load_deeph_HS('./', 'hamiltonians.h5', energy_unit=True)
+
 matS = load_deeph_HS('./', 'overlaps.h5', energy_unit=False)
 
-# Convert DFT k-points to crystal coordinates
+kpoints_cart, qe_eigenvalues, fermi_ha = parse_kpoints_and_eigs_xml(xml_path)
+FERMI_ENERGY_EV = fermi_ha * hartree2ev
+nkpt_qe = len(kpoints_cart)
+
 kpoints_cryst = []
 for kc in kpoints_cart:
     k_cryst = rprim @ kc / (2 * np.pi)
     kpoints_cryst.append(k_cryst)
 
-eigs_bandri = np.zeros((nkpt_dft, nbnd_plot))
-for ik in range(nkpt_dft):
+nbnd_plot = 30
+eigs_bandri = np.zeros((nkpt_qe, nbnd_plot))
+
+for ik in range(nkpt_qe):
     kpt_cryst = kpoints_cryst[ik]
     Sk = matS.r2k(kpt_cryst).toarray()
+
     wfc_path = f'{bands_save_dir}/wfc{ik+1}.dat'
     try:
         psi_list, miller = read_wfc_qe(wfc_path, nbands_bandri)
         phi_kg = compute_ao_in_pw_basis(miller, gprim, kpt_cryst, structure, lcaodata, ecut)
         A_k = compute_overlap_matrix_pw(psi_list, phi_kg, cell_volume)
+
         eigs_k_ha = qe_eigenvalues[ik][:nbands_bandri]
         H_bandri = compute_local_h_band_ri(eigs_k_ha, A_k)
         eigs_bandri_ha = diagonalize_generalized(H_bandri, Sk)
         eigs_bandri[ik] = eigs_bandri_ha[:nbnd_plot] * hartree2ev
     except Exception as e:
         print(f"  Warning at k={ik+1}: {e}")
-        eigs_bandri[ik] = eigs_dft[ik] + FERMI_ENERGY_EV
+        eigs_bandri[ik] = qe_eigenvalues[ik][:nbnd_plot] * hartree2ev
+
 eigs_bandri -= FERMI_ENERGY_EV
+
+# Compute k-coords for Band-RI (same as QE)
+kpoints_cart_arr = np.array(kpoints_cart)
+dis = np.linalg.norm(np.diff(kpoints_cart_arr, axis=0), axis=1)
+kcoords_bandri = np.concatenate(([0.0], np.cumsum(dis)))
 
 print("Done computing eigenvalues.")
 
 # =============================================================================
-# Align energies using VBM (band 4 = index 3 for Diamond with 8 valence electrons)
-# =============================================================================
-vbm_idx = 3
-shift_dft = -eigs_dft[:, vbm_idx].max()
-shift_orig = -eigs_orig[:, vbm_idx].max()
-shift_ri = -eigs_bandri[:, vbm_idx].max()
-
-eigs_dft_shifted = eigs_dft + shift_dft
-eigs_orig_shifted = eigs_orig + shift_orig
-eigs_ri_shifted = eigs_bandri + shift_ri
-
-# =============================================================================
 # Scale k-coordinates for consistent plotting
 # =============================================================================
-x_max = kcoords_dft[-1]
-kcoords_orig_scaled = kcoords_orig * (x_max / kcoords_orig[-1])
-
-nbnd_plot = min(nbnd_plot, eigs_orig.shape[1])
+x_max = kcoords_orig[-1]  # Use Original k-path as reference
+kcoords_dft_scaled = kcoords_dft * (x_max / kcoords_dft[-1])
+kcoords_bandri_scaled = kcoords_bandri * (x_max / kcoords_bandri[-1])
 
 # =============================================================================
 # Create plot
@@ -288,26 +271,33 @@ fig, ax = plt.subplots(1, 1, figsize=(7, 5.5))
 ax.set_xlim(0.0, x_max)
 ax.set_ylim(min_plot_energy, max_plot_energy)
 ax.set_ylabel('Energy (eV)', fontsize=fontsize)
-ax.set_xticks(hsk_coords_dft)
+ax.set_xticks(hsk_coords_orig)
 ax.set_xticklabels(hsk_symbols, fontsize=fontsize)
 ax.tick_params('y', labelsize=0.85*fontsize)
 
-for hsk in hsk_coords_dft:
+# Vertical lines at high-symmetry points
+for hsk in hsk_coords_orig:
     ax.axvline(hsk, color='black', linewidth=0.7)
+
+# Fermi level
 ax.axhline(0.0, color='black', linestyle='dashed', linewidth=0.7)
 
+# Plot bands (each with its own k-coordinates)
 for band_i in range(nbnd_plot):
+    # DFT - red solid line (QE k-path, scaled)
     label_dft = 'DFT (QE)' if band_i == 0 else None
-    ax.plot(kcoords_dft, eigs_dft_shifted[:, band_i], 'r-', linewidth=1.5, label=label_dft, zorder=3)
+    ax.plot(kcoords_dft_scaled, eigs_dft[:, band_i], 'r-', linewidth=1.5, label=label_dft, zorder=3)
 
+    # Original reconstruction - blue dashed (eig.dat k-path)
     label_orig = 'Original' if band_i == 0 else None
-    ax.plot(kcoords_orig_scaled, eigs_orig_shifted[:, band_i], 'b--', linewidth=1.2, label=label_orig, zorder=2)
+    ax.plot(kcoords_orig, eigs_orig[:, band_i], 'b--', linewidth=1.2, label=label_orig, zorder=2)
 
+    # Band-RI - green dots (QE k-path, scaled)
     label_bandri = 'Band-RI' if band_i == 0 else None
-    ax.scatter(kcoords_dft, eigs_ri_shifted[:, band_i], c='green', s=3, label=label_bandri, zorder=4)
+    ax.scatter(kcoords_bandri_scaled, eigs_bandri[:, band_i], c='green', s=3, label=label_bandri, zorder=4)
 
 ax.legend(loc='upper right', fontsize=0.75*fontsize)
-ax.set_title('Diamond Band Structure', fontsize=fontsize)
+ax.set_title('MoS2 Band Structure', fontsize=fontsize)
 
 plt.tight_layout()
 plt.savefig('band.png', dpi=plot_dpi)
@@ -315,16 +305,16 @@ plt.savefig('band.svg', transparent=True)
 print("Saved band.png and band.svg")
 
 # =============================================================================
-# Print MAE summary (VBM-aligned)
+# Print MAE summary (note: comparing on different k-grids, use with caution)
 # =============================================================================
-print("\n" + "="*60)
-print("MAE vs DFT (meV) - VBM-aligned")
-print("="*60)
+print("\n" + "="*50)
+print("MAE vs DFT (meV) - approximate, different k-grids")
+print("="*50)
 
-nk_compare = min(nkpt_dft, nkpt_orig)
-for n in [4, 8, 16]:
-    if n > nbnd_plot:
-        continue
-    mae_orig = np.mean(np.abs(eigs_orig_shifted[:nk_compare, :n] - eigs_dft_shifted[:nk_compare, :n])) * 1000
-    mae_bandri = np.mean(np.abs(eigs_ri_shifted[:, :n] - eigs_dft_shifted[:, :n])) * 1000
+# For fair comparison, interpolate or just compare at same indices
+# Here we compare by index (approximate since k-grids differ)
+nk_compare = min(nkpt_orig, nkpt_dft)
+for n in [4, 8, 16, 20]:
+    mae_orig = np.mean(np.abs(eigs_orig[:nk_compare, :n] - eigs_dft[:nk_compare, :n])) * 1000
+    mae_bandri = np.mean(np.abs(eigs_bandri[:nk_compare, :n] - eigs_dft[:nk_compare, :n])) * 1000
     print(f"Lowest {n:2d} bands: Original = {mae_orig:7.1f} meV, Band-RI = {mae_bandri:7.1f} meV")
